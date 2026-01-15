@@ -214,6 +214,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'OPEN_DEBUG_VIEW') {
+    try {
+      const url = chrome.runtime.getURL('popup/index.html');
+      chrome.tabs.create({ url }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('[SF CRM Extractor][OPEN_DEBUG_VIEW] Failed to open debug view', chrome.runtime.lastError);
+          sendResponse({ status: 'error', error: chrome.runtime.lastError.message || 'Failed to open debug view' });
+          return;
+        }
+        sendResponse({ status: 'ok' });
+      });
+      return true;
+    } catch (err) {
+      console.error('[SF CRM Extractor][OPEN_DEBUG_VIEW] Unexpected error', err);
+      sendResponse({ status: 'error', error: String(err && err.message ? err.message : err) });
+      return false;
+    }
+  }
+
   if (message.type === 'REQUEST_EXTRACT_ACTIVE_TAB') {
     handleRequestExtractActiveTab(message)
       .then((result) => sendResponse(result))

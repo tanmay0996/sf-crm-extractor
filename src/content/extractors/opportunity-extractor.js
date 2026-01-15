@@ -203,6 +203,20 @@
     const record = extractOpportunityRecord();
     if (!record) {
       console.log('[SF CRM Extractor][Opportunity] No Opportunity record detected (reason:', reason, ').');
+      if (window.SFCrmIndicator && typeof window.SFCrmIndicator.setStatus === 'function') {
+        window.SFCrmIndicator.setStatus('error');
+      }
+      return;
+    }
+
+    if (!record.salesforceId) {
+      console.warn(
+        '[SF CRM Extractor][Opportunity] Extracted record is missing salesforceId; skipping merge. Record:',
+        record
+      );
+      if (window.SFCrmIndicator && typeof window.SFCrmIndicator.setStatus === 'function') {
+        window.SFCrmIndicator.setStatus('error');
+      }
       return;
     }
 
@@ -214,8 +228,14 @@
         objectType: 'opportunity',
         payload: record
       });
+      if (window.SFCrmIndicator && typeof window.SFCrmIndicator.setStatus === 'function') {
+        window.SFCrmIndicator.setStatus('success');
+      }
     } catch (err) {
       console.error('[SF CRM Extractor][Opportunity] Error sending extraction result', err);
+      if (window.SFCrmIndicator && typeof window.SFCrmIndicator.setStatus === 'function') {
+        window.SFCrmIndicator.setStatus('error');
+      }
     }
   }
 
@@ -265,6 +285,9 @@
     }
 
     console.log('[SF CRM Extractor][Opportunity] RUN_EXTRACTION message received', message);
+    if (window.SFCrmIndicator && typeof window.SFCrmIndicator.setStatus === 'function') {
+      window.SFCrmIndicator.setStatus('extracting');
+    }
     runExtractionAndReport('run-extraction-message');
     sendResponse({ status: 'ok' });
     return false;

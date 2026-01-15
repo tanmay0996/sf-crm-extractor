@@ -18,6 +18,7 @@
         "https://*.salesforce.com/*"
       ],
       "js": [
+        "src/content/shadow-indicator.js",
         "src/content/extractors/opportunity-extractor.js",
         "src/content/content-main.js"
       ],
