@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react';
 // Vite config for the popup React app
 export default defineConfig({
   root: 'src/popup',
+  // Use a relative base so asset URLs work when served from popup/index.html
+  // inside the Chrome extension (no leading /assets/...).
+  base: '',
   plugins: [react()],
   build: {
     // Build into the project root's dist/popup so tools/pack.mjs

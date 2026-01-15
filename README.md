@@ -81,3 +81,15 @@ The content script is configured to run on:
 - `https://*.salesforce.com/*`
 
 The service worker logs startup and listens for basic messages from the content script.
+
+### 6. Manual end-to-end test for the popup
+
+1. Load the unpacked extension from `dist-extension` as described above.
+2. In Chrome, navigate to a Salesforce Lightning **Opportunity** record detail page.
+3. Open the **SF CRM Extractor** popup from the toolbar.
+4. Click **Extract Current Object**.
+5. Wait a moment; the status message in the popup should report success.
+6. The **Opportunities** tab in the popup should list the extracted record, including fields such as name, amount,
+   stage, probability, close date, account name, and last updated.
+7. Use the search box to filter by opportunity name or account name.
+8. Click **Delete** on a row to remove it from storage; the list should update immediately.
