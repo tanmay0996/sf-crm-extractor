@@ -54,42 +54,104 @@ function setLocalWithRetry(key, value, maxRetries = 2) {
   });
 }
 
+function computeDeterministicKey(objectType, record) {
+  const base = `${objectType}|${record.name || ''}|${record.accountName || ''}|${record.closeDate || ''}`;
+  let hash = 0;
+  for (let i = 0; i < base.length; i += 1) {
+    hash = (hash * 31 + base.charCodeAt(i)) | 0;
+  }
+  return `hash_${Math.abs(hash)}`;
+}
+
+function parseIsoToMs(value) {
+  if (!value) return 0;
+  const t = Date.parse(value);
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function countNonEmptyFields(obj) {
+  if (!obj || typeof obj !== 'object') return 0;
+  const ignore = new Set([
+    'lastUpdated',
+    'sourceUrl',
+    'sourcePage',
+    'rowIndex',
+    'deleted',
+    'deletedAt'
+  ]);
+  let count = 0;
+  Object.keys(obj).forEach((key) => {
+    if (ignore.has(key)) return;
+    const value = obj[key];
+    if (value === null || value === undefined) return;
+    if (typeof value === 'string' && value.trim() === '') return;
+    count += 1;
+  });
+  return count;
+}
+
 /**
  * Merge a single Salesforce record into chrome.storage.local.salesforce_data.
  *
- * - If the record Id already exists, only updated fields are overwritten; any
- *   fields missing from the new payload are preserved from the existing
- *   record. lastUpdated is always refreshed.
- * - If the record Id does not exist, a new entry is created.
+ * Deduplication & keying:
+ * - Use salesforceId if available as the storage key.
+ * - Otherwise use a deterministic hash based on type + name + accountName + closeDate.
+ *
+ * Conflict resolution:
+ * - Prefer the record with newer lastUpdated.
+ * - If timestamps are equal, prefer the more complete record (more non-empty fields).
  */
 async function mergeSalesforceRecord(objectType, record) {
-  if (!record || !record.salesforceId) {
-    throw new Error('mergeSalesforceRecord requires a record with salesforceId');
+  if (!record) {
+    throw new Error('mergeSalesforceRecord requires a record payload');
   }
 
   const existingRoot = (await getLocal(SALESFORCE_STORAGE_KEY)) || createEmptySalesforceData();
 
   const bucket = ensureTypeBucket(existingRoot, objectType);
 
-  const id = record.salesforceId;
-  const existing = bucket.byId[id] || {};
+  const storageKey = record.salesforceId || computeDeterministicKey(objectType, record);
+  const existing = bucket.byId[storageKey] || {};
 
   const nowIso = new Date().toISOString();
+  const incomingLastUpdatedIso = record.lastUpdated || nowIso;
+  const existingLastUpdatedIso = existing.lastUpdated || null;
 
-  // Shallow-merge fields, preferring incoming record while preserving any
-  // fields that are not present on the new payload.
-  const merged = {
-    ...existing,
-    ...record,
-    lastUpdated: record.lastUpdated || nowIso
-  };
+  const incomingMs = parseIsoToMs(incomingLastUpdatedIso);
+  const existingMs = parseIsoToMs(existingLastUpdatedIso);
 
-  bucket.byId[id] = merged;
+  let chosen;
+
+  if (!existingLastUpdatedIso) {
+    // No existing record: take incoming as-is (merged with any residual fields).
+    chosen = { ...existing, ...record };
+  } else if (incomingMs > existingMs) {
+    // Incoming is newer.
+    chosen = { ...existing, ...record };
+  } else if (incomingMs < existingMs) {
+    // Existing is newer; keep it, but still merge in non-conflicting metadata if desired.
+    chosen = { ...existing };
+  } else {
+    // Same timestamp; prefer the more complete record.
+    const existingScore = countNonEmptyFields(existing);
+    const incomingScore = countNonEmptyFields(record);
+    if (incomingScore >= existingScore) {
+      chosen = { ...existing, ...record };
+    } else {
+      chosen = { ...existing };
+    }
+  }
+
+  // Ensure bookkeeping fields are set.
+  chosen.lastUpdated = incomingMs >= existingMs ? incomingLastUpdatedIso : existingLastUpdatedIso || nowIso;
+
+  // Persist under computed storage key.
+  bucket.byId[storageKey] = chosen;
   bucket.lastSync = nowIso;
 
   await setLocalWithRetry(SALESFORCE_STORAGE_KEY, existingRoot, 2);
 
-  return { objectType, id, record: merged };
+  return { objectType, id: storageKey, record: chosen };
 }
 
 // Track pending REQUEST_EXTRACT_ACTIVE_TAB flows so we can resolve them when

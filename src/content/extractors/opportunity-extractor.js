@@ -16,6 +16,12 @@
     return match ? match[1] : null;
   }
 
+  // List view URLs should be handled by the list-view extractor, not the detail extractor.
+  function isOpportunityListUrl(url) {
+    if (!url) return false;
+    return /\/lightning\/o\/Opportunity\/(list|home)/.test(url);
+  }
+
   function normalizeText(node) {
     if (!node) return '';
     return node.textContent.replace(/\s+/g, ' ').trim();
@@ -106,6 +112,11 @@
 
   function extractOpportunityRecord() {
     const url = window.location.href;
+    // Guard: on Opportunity list/home pages, defer to the list-view extractor instead of
+    // trying to parse a single record layout.
+    if (isOpportunityListUrl(url)) {
+      return null;
+    }
     const isOpp = isOpportunityUrl(url) || detectOpportunityHeader();
     if (!isOpp) {
       return null;
@@ -200,6 +211,21 @@
   }
 
   function runExtractionAndReport(reason) {
+    const url = window.location.href;
+
+    // If we are on a list view, do not treat the absence of a single record as an
+    // error. The list-view extractor is responsible for this surface.
+    if (isOpportunityListUrl(url)) {
+      console.log(
+        '[SF CRM Extractor][Opportunity] Skipping detail extraction on list view (reason:',
+        reason,
+        ', url:',
+        url,
+        ')'
+      );
+      return;
+    }
+
     const record = extractOpportunityRecord();
     if (!record) {
       console.log('[SF CRM Extractor][Opportunity] No Opportunity record detected (reason:', reason, ').');
@@ -281,6 +307,26 @@
 
     const { objectType } = message;
     if (objectType && objectType !== 'opportunity') {
+      return false;
+    }
+
+    const url = window.location.href;
+
+    // If this is an Opportunity list/home view, delegate extraction to the
+    // list-view extractor hook so the popup button works there as well.
+    if (isOpportunityListUrl(url) && typeof window.runOpportunityListExtractionVisible === 'function') {
+      console.log(
+        '[SF CRM Extractor][Opportunity] RUN_EXTRACTION delegated to list-view extractor (url:',
+        url,
+        ', message:',
+        message,
+        ')'
+      );
+      if (window.SFCrmIndicator && typeof window.SFCrmIndicator.setStatus === 'function') {
+        window.SFCrmIndicator.setStatus('extracting');
+      }
+      window.runOpportunityListExtractionVisible();
+      sendResponse({ status: 'ok', delegatedTo: 'list-view' });
       return false;
     }
 

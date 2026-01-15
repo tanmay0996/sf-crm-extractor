@@ -4,7 +4,8 @@ import {
   getOpportunities,
   deleteOpportunity,
   requestExtractActiveOpportunity,
-  subscribeToSalesforceChanges
+  subscribeToSalesforceChanges,
+  mergeRecord
 } from './storageClient.js';
 
 const TABS = [{ id: 'opportunities', label: 'Opportunities' }];
@@ -15,6 +16,7 @@ function App() {
   const [search, setSearch] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractStatus, setExtractStatus] = useState(null); // { status, message }
+  const [lastDeleted, setLastDeleted] = useState(null); // { record, timeoutId }
 
   // Initial load and subscription for live updates.
   useEffect(() => {
@@ -49,10 +51,15 @@ function App() {
     };
   }, []);
 
+  const activeOpportunities = useMemo(
+    () => opportunities.filter((item) => !item.deleted),
+    [opportunities]
+  );
+
   const filteredOpportunities = useMemo(() => {
-    if (!search) return opportunities;
+    if (!search) return activeOpportunities;
     const q = search.toLowerCase();
-    return opportunities.filter((item) => {
+    return activeOpportunities.filter((item) => {
       const fields = [
         item.name,
         item.accountName,
@@ -64,7 +71,7 @@ function App() {
         .map((v) => String(v).toLowerCase());
       return fields.some((f) => f.includes(q));
     });
-  }, [opportunities, search]);
+  }, [activeOpportunities, search]);
 
   const handleExtract = async () => {
     setIsExtracting(true);
@@ -91,10 +98,110 @@ function App() {
   const handleDelete = async (item) => {
     if (!item || !item.salesforceId) return;
     try {
-      await deleteOpportunity(item.salesforceId);
+      // Clear any existing undo timer
+      if (lastDeleted && lastDeleted.timeoutId) {
+        clearTimeout(lastDeleted.timeoutId);
+      }
+
+      const response = await deleteOpportunity(item.salesforceId);
+
+      const timeoutId = window.setTimeout(() => {
+        setLastDeleted(null);
+      }, 30_000);
+
+      setLastDeleted({ record: item, response, timeoutId });
     } catch (err) {
       console.error('[SF CRM Extractor][Popup] Failed to delete opportunity', err);
     }
+  };
+
+  const handleUndoDelete = async () => {
+    if (!lastDeleted || !lastDeleted.record) return;
+    const original = lastDeleted.record;
+    try {
+      const nowIso = new Date().toISOString();
+      // Restore the record by clearing deleted flags and bumping lastUpdated.
+      await mergeRecord('opportunity', {
+        ...original,
+        deleted: false,
+        deletedAt: null,
+        lastUpdated: nowIso
+      });
+    } catch (err) {
+      console.error('[SF CRM Extractor][Popup] Failed to undo delete', err);
+    } finally {
+      if (lastDeleted.timeoutId) {
+        clearTimeout(lastDeleted.timeoutId);
+      }
+      setLastDeleted(null);
+    }
+  };
+
+  const generateCSV = (records) => {
+    if (!records || records.length === 0) return '';
+    const header = [
+      'salesforceId',
+      'name',
+      'accountName',
+      'amount',
+      'stage',
+      'probability',
+      'closeDate',
+      'ownerName',
+      'lastUpdated',
+      'sourceUrl'
+    ];
+
+    const escape = (value) => {
+      if (value === null || value === undefined) return '';
+      const str = String(value);
+      if (/[",\n]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const lines = [header.join(',')];
+    records.forEach((r) => {
+      const row = [
+        r.salesforceId || '',
+        r.name || '',
+        r.accountName || '',
+        r.amount ?? '',
+        r.stage || '',
+        r.probability ?? '',
+        r.closeDate || '',
+        r.ownerName || '',
+        r.lastUpdated || '',
+        r.sourceUrl || ''
+      ].map(escape);
+      lines.push(row.join(','));
+    });
+
+    return lines.join('\n');
+  };
+
+  const triggerDownload = (filename, mimeType, content) => {
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportCsv = () => {
+    const csv = generateCSV(filteredOpportunities);
+    if (!csv) return;
+    triggerDownload('opportunities.csv', 'text/csv', csv);
+  };
+
+  const handleExportJson = () => {
+    const json = JSON.stringify(filteredOpportunities, null, 2);
+    triggerDownload('opportunities.json', 'application/json', json);
   };
 
   const currentTab = activeTab; // Only one for now, but keeps structure extensible.
@@ -133,6 +240,21 @@ function App() {
           />
         </div>
 
+        {lastDeleted && lastDeleted.record && (
+          <div className="flex items-center justify-between gap-2 text-[11px] px-2 py-1 rounded-md border bg-amber-50 border-amber-200 text-amber-800">
+            <span>
+              Record deleted. You can undo this action for a short time.
+            </span>
+            <button
+              type="button"
+              onClick={handleUndoDelete}
+              className="inline-flex items-center rounded-sm border border-amber-400 px-1.5 py-0.5 text-[11px] font-medium bg-amber-100 hover:bg-amber-200"
+            >
+              Undo
+            </button>
+          </div>
+        )}
+
         {extractStatus && (
           <div
             className={`text-[11px] px-2 py-1 rounded-md border ${
@@ -149,21 +271,42 @@ function App() {
           </div>
         )}
 
-        <div className="border-b border-slate-200 flex items-center gap-1 text-[11px] font-medium text-slate-600 mt-1">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-2 py-1 border-b-2 -mb-px ${
-                currentTab === tab.id
-                  ? 'border-indigo-500 text-indigo-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="border-b border-slate-200 flex items-center justify-between gap-2 text-[11px] font-medium text-slate-600 mt-1">
+          <div className="flex items-center gap-1">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-2 py-1 border-b-2 -mb-px ${
+                  currentTab === tab.id
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {currentTab === 'opportunities' && (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="inline-flex items-center rounded-sm border border-slate-200 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={handleExportJson}
+                className="inline-flex items-center rounded-sm border border-slate-200 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
+              >
+                Export JSON
+              </button>
+            </div>
+          )}
         </div>
 
         <section className="flex-1 flex flex-col gap-1 mt-1">

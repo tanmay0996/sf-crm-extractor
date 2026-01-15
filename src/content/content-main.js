@@ -18,3 +18,21 @@ try {
 if (typeof window.runOpportunityExtraction === 'function') {
   console.log('[SF CRM Extractor] Opportunity extractor hook available as window.runOpportunityExtraction()');
 }
+
+if (typeof window.runOpportunityListExtractionVisible === 'function') {
+  console.log(
+    '[SF CRM Extractor] List view extractor hook available as window.runOpportunityListExtractionVisible()'
+  );
+}
+
+if (typeof window.runOpportunityKanbanExtractionVisible === 'function') {
+  console.log(
+    '[SF CRM Extractor] Kanban extractor hook available as window.runOpportunityKanbanExtractionVisible()'
+  );
+}
+
+if (typeof window.runAccountContactsRelatedListExtractionVisible === 'function') {
+  console.log(
+    '[SF CRM Extractor] Related Contacts extractor hook available as window.runAccountContactsRelatedListExtractionVisible()'
+  );
+}

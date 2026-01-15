@@ -19,6 +19,9 @@
       ],
       "js": [
         "src/content/shadow-indicator.js",
+        "src/content/extractors/list-extractor.js",
+        "src/content/extractors/kanban-extractor.js",
+        "src/content/extractors/relatedlist-extractor.js",
         "src/content/extractors/opportunity-extractor.js",
         "src/content/content-main.js"
       ],

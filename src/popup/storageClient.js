@@ -34,23 +34,43 @@ export async function getOpportunities() {
   return Object.values(byId);
 }
 
+export async function mergeRecord(objectType, record) {
+  if (!objectType || !record) return null;
+  return withChromePromise((cb) => {
+    chrome.runtime.sendMessage(
+      {
+        type: 'MERGE_RECORD',
+        payload: { objectType, record }
+      },
+      (response) => cb(response || null)
+    );
+  });
+}
+
 export async function deleteOpportunity(id) {
   if (!id) return;
 
   const root = (await getSalesforceData()) || {};
   const bucket = root.opportunities || { byId: {} };
   const byId = bucket.byId || {};
+  const existing = byId[id];
 
-  if (byId[id]) {
-    delete byId[id];
+  if (!existing) {
+    return null;
   }
 
-  bucket.byId = byId;
-  root.opportunities = bucket;
+  const nowIso = new Date().toISOString();
 
-  return withChromePromise((cb) => {
-    chrome.storage.local.set({ [SALESFORCE_STORAGE_KEY]: root }, () => cb(true));
-  });
+  // Soft-delete: mark record as deleted, preserving its other fields.
+  const record = {
+    ...existing,
+    salesforceId: existing.salesforceId || id,
+    deleted: true,
+    deletedAt: nowIso,
+    lastUpdated: nowIso
+  };
+
+  return mergeRecord('opportunity', record);
 }
 
 export async function requestExtractActiveOpportunity() {
@@ -70,7 +90,10 @@ export async function requestExtractActiveOpportunity() {
 export function subscribeToSalesforceChanges(handler) {
   function listener(changes, areaName) {
     if (areaName !== 'local' || !changes[SALESFORCE_STORAGE_KEY]) return;
-    handler(changes[SALESFORCE_STORAGE_KEY].newValue || null);
+    const nextValue = changes[SALESFORCE_STORAGE_KEY].newValue || null;
+    // Example onChanged handler: pass the full salesforce_data root to the caller
+    // so the popup can update its local state in real time.
+    handler(nextValue);
   }
 
   chrome.storage.onChanged.addListener(listener);
