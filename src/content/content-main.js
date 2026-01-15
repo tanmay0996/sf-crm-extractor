@@ -12,3 +12,9 @@ try {
 } catch (err) {
   console.error('[SF CRM Extractor] Error sending message to service worker', err);
 }
+
+// If the Opportunity extractor has attached a manual hook, log its presence
+// so it is easy to trigger from devtools for testing.
+if (typeof window.runOpportunityExtraction === 'function') {
+  console.log('[SF CRM Extractor] Opportunity extractor hook available as window.runOpportunityExtraction()');
+}
