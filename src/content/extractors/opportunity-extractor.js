@@ -252,4 +252,21 @@
   };
 
   setupObserver();
+ 
+  // Respond to explicit RUN_EXTRACTION requests from the background script.
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || message.type !== 'RUN_EXTRACTION') {
+      return false;
+    }
+
+    const { objectType } = message;
+    if (objectType && objectType !== 'opportunity') {
+      return false;
+    }
+
+    console.log('[SF CRM Extractor][Opportunity] RUN_EXTRACTION message received', message);
+    runExtractionAndReport('run-extraction-message');
+    sendResponse({ status: 'ok' });
+    return false;
+  });
 })();
